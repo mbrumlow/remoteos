@@ -22,7 +22,6 @@ func (f *File) Read(p []byte) (n int, err error) {
 	}
 
 	var buf []byte
-
 	if err := m.Decode(&buf); err != nil {
 		return 0, &os.PathError{"read", f.name, err}
 	}
@@ -34,6 +33,31 @@ func (f *File) Read(p []byte) (n int, err error) {
 	copy(p, buf)
 
 	return len(buf), nil
+}
+
+func (f *File) pread64(p []byte, off int64) (n int, err error) {
+
+	m, err := f.rh.sendCall(SYS_PREAD64, f.fd, off, int32(len(p)))
+	if err != nil {
+		return 0, &os.PathError{"read", f.name, err}
+	}
+
+	var buf []byte
+	if err := m.Decode(&buf); err != nil {
+		return 0, &os.PathError{"read", f.name, err}
+	}
+
+	if len(buf) == 0 {
+		return 0, io.EOF
+	}
+
+	copy(p, buf)
+
+	return len(buf), nil
+}
+
+func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
+	return f.pread64(b, off)
 }
 
 func (f *File) Write(b []byte) (n int, err error) {
@@ -50,6 +74,7 @@ func (f *File) Write(b []byte) (n int, err error) {
 }
 
 func (f *File) pwrite64(b []byte, off int64) (n int, err error) {
+
 	m, err := f.rh.sendCall(SYS_PWRITE64, f.fd, off, int32(len(b)), b)
 	if err != nil {
 		return 0, &os.PathError{"write", f.name, err}
@@ -60,6 +85,10 @@ func (f *File) pwrite64(b []byte, off int64) (n int, err error) {
 	}
 
 	return
+}
+
+func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
+	return f.pwrite64(b, off)
 }
 
 func (f *File) Close() error {

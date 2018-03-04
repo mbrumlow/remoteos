@@ -98,6 +98,10 @@ func (lh *LocalHost) handleSysCall(conn net.Conn, m *proto.Message) error {
 		return lh.sysClose(conn, m)
 	case SYS_SEEK:
 		return lh.sysSeek(conn, m)
+	case SYS_PREAD64:
+		return lh.sysReadAt(conn, m)
+	case SYS_PWRITE64:
+		return lh.sysWriteAt(conn, m)
 	}
 
 	// TODO return a unsupported error to caller.
@@ -134,6 +138,36 @@ func (lh *LocalHost) sysRead(conn net.Conn, m *proto.Message) error {
 	return SendResult(conn, buf[:n])
 }
 
+func (lh *LocalHost) sysReadAt(conn net.Conn, m *proto.Message) error {
+
+	var fd int64
+	var size int32
+	var off int64
+
+	log.Printf("sysReadAt decoding syscall buffer")
+	if err := m.Decode(&fd, &size, &off); err != nil {
+		log.Printf("sysRead syscall buffer ERR")
+		return err
+	}
+	log.Printf("sysReadAt syscall buffer OK")
+
+	file, ok := lh.LoadFile(fd)
+	if !ok {
+		log.Printf("os.ReadAt(%v, %v, %v) -> %v\n", fd, size, off, "Invalid argument")
+		return SendError(conn, "Invalid argument")
+	}
+
+	buf := make([]byte, size)
+	n, err := file.ReadAt(buf, off)
+	if err != nil && err != io.EOF {
+		log.Printf("os.Read(%v, %v, %v) -> %v\n", fd, size, off, errStr(err))
+		return SendError(conn, errStr(err))
+	}
+
+	log.Printf("os.ReadAt(%v, %v, %v) -> ...\n", fd, size, off)
+	return SendResult(conn, buf[:n])
+}
+
 func (lh *LocalHost) sysWrite(conn net.Conn, m *proto.Message) error {
 
 	var fd int64
@@ -162,7 +196,7 @@ func (lh *LocalHost) sysWrite(conn net.Conn, m *proto.Message) error {
 	return SendResult(conn, int32(n))
 }
 
-func (lh *LocalHost) hosWriteAt(conn net.Conn, m proto.Message) error {
+func (lh *LocalHost) sysWriteAt(conn net.Conn, m *proto.Message) error {
 
 	var fd int64
 	var offset int64
@@ -182,12 +216,12 @@ func (lh *LocalHost) hosWriteAt(conn net.Conn, m proto.Message) error {
 
 	n, err := file.WriteAt(buf, offset)
 	if err != nil && err != io.EOF {
-		log.Printf("os.Write(%v, %v, ...) -> %v\n", fd, len(buf), errStr(err))
+		log.Printf("os.WriteAt(%v, %v, ...) -> %v\n", fd, len(buf), errStr(err))
 		return SendError(conn, errStr(err))
 	}
 
-	log.Printf("os.Write(%v, %v, ...) -> %v\n", fd, len(buf), n)
-	return SendResult(conn, int32(n))
+	log.Printf("os.WriteAt(%v, %v, ...) -> %v\n", fd, len(buf), n)
+	return SendResult(conn, n)
 }
 
 func (lh *LocalHost) sysOpen(conn net.Conn, m *proto.Message) error {

@@ -12,12 +12,14 @@ import (
 )
 
 const (
-	CMD_SYSCALL  = uint32(0)
+	CMD_SYSCALL = uint32(0)
+
 	SYS_READ     = uint32(0)
 	SYS_WRITE    = uint32(1)
 	SYS_OPEN     = uint32(2)
 	SYS_CLOSE    = uint32(3)
 	SYS_SEEK     = uint32(8)
+	SYS_PREAD64  = uint32(17)
 	SYS_PWRITE64 = uint32(18)
 )
 
