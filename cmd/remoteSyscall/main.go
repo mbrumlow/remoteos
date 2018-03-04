@@ -1,8 +1,6 @@
 package main
 
-import (
-	remote "github.com/mbrumlow/remote/pkg"
-)
+import "github.com/mbrumlow/remoteos/pkg/remote"
 
 func main() {
 	lh := remote.NewLocalHost(":7575")

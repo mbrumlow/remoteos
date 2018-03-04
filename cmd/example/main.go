@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	remote "github.com/mbrumlow/remote/pkg"
+	"github.com/mbrumlow/remoteos/pkg/remote"
 )
 
 func main() {

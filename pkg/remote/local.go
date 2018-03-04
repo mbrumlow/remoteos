@@ -10,7 +10,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/mbrumlow/remote/pkg/proto"
+	"github.com/mbrumlow/remoteos/pkg/proto"
 )
 
 type LocalHost struct {
