@@ -16,23 +16,19 @@ func (f *File) Name() string {
 }
 
 func (f *File) Read(p []byte) (n int, err error) {
-	m, err := f.rh.sendCall(SYS_READ, f.fd, int32(len(p)))
+	n, err = f.rh.read(f.fd, p)
+	if err != nil && err != io.EOF {
+		return 0, &os.PathError{"read", f.name, err}
+	}
+	return
+}
+
+func (f *File) Write(b []byte) (n int, err error) {
+	n, err = f.rh.write(f.fd, b)
 	if err != nil {
-		return 0, &os.PathError{"read", f.name, err}
+		return 0, &os.PathError{"write", f.name, err}
 	}
-
-	var buf []byte
-	if err := m.Decode(&buf); err != nil {
-		return 0, &os.PathError{"read", f.name, err}
-	}
-
-	if len(buf) == 0 {
-		return 0, io.EOF
-	}
-
-	copy(p, buf)
-
-	return len(buf), nil
+	return
 }
 
 func (f *File) pread64(p []byte, off int64) (n int, err error) {
@@ -58,19 +54,6 @@ func (f *File) pread64(p []byte, off int64) (n int, err error) {
 
 func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
 	return f.pread64(b, off)
-}
-
-func (f *File) Write(b []byte) (n int, err error) {
-	m, err := f.rh.sendCall(SYS_WRITE, f.fd, b)
-	if err != nil {
-		return 0, &os.PathError{"write", f.name, err}
-	}
-
-	if err := m.Decode(&n); err != nil {
-		return 0, &os.PathError{"write", f.name, err}
-	}
-
-	return
 }
 
 func (f *File) pwrite64(b []byte, off int64) (n int, err error) {

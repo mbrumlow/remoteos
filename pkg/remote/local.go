@@ -89,9 +89,17 @@ func (lh *LocalHost) handleSysCall(conn net.Conn, m *proto.Message) error {
 
 	switch syscall {
 	case SYS_READ:
-		return lh.sysRead(conn, m)
+		if buf, err := lh.read(m); err != nil {
+			return err
+		} else {
+			return SendBuffer(conn, buf)
+		}
 	case SYS_WRITE:
-		return lh.sysWrite(conn, m)
+		if buf, err := lh.write(m); err != nil {
+			return err
+		} else {
+			return SendBuffer(conn, buf)
+		}
 	case SYS_OPEN:
 		return lh.sysOpen(conn, m)
 	case SYS_CLOSE:
@@ -110,6 +118,35 @@ func (lh *LocalHost) handleSysCall(conn net.Conn, m *proto.Message) error {
 }
 
 func (lh *LocalHost) sysRead(conn net.Conn, m *proto.Message) error {
+
+	var fd int64
+	var size int
+
+	log.Printf("sysReadAt decoding syscall buffer")
+	if err := decodeRead(m, &fd, &size); err != nil {
+		log.Printf("sysRead syscall buffer ERR")
+		return err
+	}
+	log.Printf("sysRead syscall buffer OK")
+
+	file, ok := lh.LoadFile(fd)
+	if !ok {
+		log.Printf("os.Read(%v, %v) -> %v\n", fd, size, "Invalid argument")
+		return SendError(conn, "Invalid argument")
+	}
+
+	buf := make([]byte, size)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		log.Printf("os.Read(%v, %v) -> %v\n", fd, size, errStr(err))
+		return SendError(conn, errStr(err))
+	}
+
+	log.Printf("os.Read(%v, %v) -> ...\n", fd, size)
+	return SendResult(conn, buf[:n])
+}
+
+func (lh *LocalHost) sysRead2(conn net.Conn, m *proto.Message) error {
 
 	var fd int64
 	var size int32

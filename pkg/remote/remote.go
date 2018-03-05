@@ -35,7 +35,7 @@ func Connect(host string) (*RemoteHost, error) {
 	return &RemoteHost{conn: conn}, err
 }
 
-func sendBuffer(conn net.Conn, b []byte) error {
+func SendBuffer(conn net.Conn, b []byte) error {
 	size := uint32(len(b))
 	if err := binary.Write(conn, binary.BigEndian, size); err != nil {
 		return err
@@ -53,13 +53,31 @@ func sendBuffer(conn net.Conn, b []byte) error {
 func SendError(conn net.Conn, s string) error {
 	ret := new(bytes.Buffer)
 	proto.EncodeError(ret, s)
-	return sendBuffer(conn, ret.Bytes())
+	return SendBuffer(conn, ret.Bytes())
 }
 
 func SendResult(conn net.Conn, a ...interface{}) error {
 	ret := new(bytes.Buffer)
 	proto.EncodeResult(ret, a...)
-	return sendBuffer(conn, ret.Bytes())
+	return SendBuffer(conn, ret.Bytes())
+}
+
+func result(e error, a ...interface{}) ([]byte, error) {
+
+	ret := new(bytes.Buffer)
+
+	if e != nil {
+		if err := proto.EncodeError(ret, errStr(e)); err != nil {
+			return nil, err
+		}
+		return ret.Bytes(), nil
+	}
+
+	if err := proto.EncodeResult(ret, a...); err != nil {
+		return nil, err
+	}
+
+	return ret.Bytes(), nil
 }
 
 func reciveBuffer(conn net.Conn) (*bytes.Buffer, error) {
@@ -76,12 +94,46 @@ func reciveBuffer(conn net.Conn) (*bytes.Buffer, error) {
 	return bytes.NewBuffer(buf), nil
 }
 
+func (rh *RemoteHost) sendCall2(b []byte) (*proto.Message, error) {
+
+	if err := SendBuffer(rh.conn, b); err != nil {
+		// TODO: figure out what to do.
+		// TODO: Mabye sessions for reconnect?
+		return nil, err
+	}
+
+	bb, err := reciveBuffer(rh.conn)
+	if err != nil {
+		// TODO: figure out what to do.
+		// TODO: Mabye sessions for reconnect?
+		return nil, err
+	}
+
+	m := proto.NewMessage(bb)
+
+	var ret int32
+	if err := m.Decode(&ret); err != nil {
+		return m, err
+	}
+
+	switch ret {
+	case 0:
+		return m, nil
+	case 1:
+		return m, m.DecodeError()
+	case 2:
+		return m, fmt.Errorf("unsupported")
+	}
+
+	return m, fmt.Errorf("unknown")
+}
+
 func (rh *RemoteHost) sendCall(call uint32, a ...interface{}) (*proto.Message, error) {
 
 	request := new(bytes.Buffer)
 	proto.EncodeCall(request, CMD_SYSCALL, call, a...)
 
-	if err := sendBuffer(rh.conn, request.Bytes()); err != nil {
+	if err := SendBuffer(rh.conn, request.Bytes()); err != nil {
 		// TODO: figure out what to do.
 		// TODO: Mabye sessions for reconnect?
 		return nil, err
@@ -98,7 +150,7 @@ func (rh *RemoteHost) sendCall(call uint32, a ...interface{}) (*proto.Message, e
 	var ret int32
 
 	if err := m.Decode(&ret); err != nil {
-		return m, err
+		return nil, err
 	}
 
 	switch ret {

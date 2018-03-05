@@ -16,6 +16,10 @@ func NewMessage(bb *bytes.Buffer) *Message {
 	return &Message{bb: bb}
 }
 
+func (m *Message) Bytes() []byte {
+	return m.bb.Bytes()
+}
+
 func (m *Message) Decode(a ...interface{}) error {
 	return Decode(m.bb, a...)
 }
@@ -117,13 +121,19 @@ func EncodeCall(bb *bytes.Buffer, cmd, call uint32, a ...interface{}) {
 	Encode(bb, a...)
 }
 
-func EncodeError(bb *bytes.Buffer, s string) {
-	Encode(bb, int32(1), s)
+func EncodeError(bb *bytes.Buffer, s string) error {
+	return Encode(bb, int32(1), s)
 }
 
-func EncodeResult(bb *bytes.Buffer, a ...interface{}) {
-	Encode(bb, int32(0))
-	Encode(bb, a...)
+func EncodeResult(bb *bytes.Buffer, a ...interface{}) error {
+	if err := Encode(bb, int32(0)); err != nil {
+		return err
+	}
+	if err := Encode(bb, a...); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func DecodeError(bb *bytes.Buffer) error {
