@@ -166,17 +166,10 @@ func (rh *RemoteHost) sendCall(call uint32, a ...interface{}) (*proto.Message, e
 }
 
 func (rh *RemoteHost) OpenFile(name string, flag int, perm os.FileMode) (*File, error) {
-
-	m, err := rh.sendCall(SYS_OPEN, name, flag, perm)
+	fd, err := rh.open(name, flag, perm)
 	if err != nil {
-		return nil, &os.PathError{Op: "open", Path: name, Err: err}
-	}
-
-	var fd int64
-	if err := m.Decode(&fd); err != nil {
 		return nil, &os.PathError{"open", name, err}
 	}
-
 	return &File{fd: fd, name: name, rh: rh}, nil
 }
 

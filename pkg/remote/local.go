@@ -44,6 +44,8 @@ func (lh *LocalHost) handleConnection(conn net.Conn) {
 
 	log.Printf("Handling connection")
 
+	defer conn.Close()
+
 	for {
 
 		var len uint32
@@ -101,11 +103,19 @@ func (lh *LocalHost) handleSysCall(conn net.Conn, m *proto.Message) error {
 			return SendBuffer(conn, buf)
 		}
 	case SYS_OPEN:
-		return lh.sysOpen(conn, m)
+		if buf, err := lh.open(m); err != nil {
+			return err
+		} else {
+			return SendBuffer(conn, buf)
+		}
 	case SYS_CLOSE:
 		return lh.sysClose(conn, m)
 	case SYS_SEEK:
-		return lh.sysSeek(conn, m)
+		if buf, err := lh.seek(m); err != nil {
+			return err
+		} else {
+			return SendBuffer(conn, buf)
+		}
 	case SYS_PREAD64:
 		return lh.sysReadAt(conn, m)
 	case SYS_PWRITE64:
@@ -115,64 +125,6 @@ func (lh *LocalHost) handleSysCall(conn net.Conn, m *proto.Message) error {
 	// TODO return a unsupported error to caller.
 
 	return nil
-}
-
-func (lh *LocalHost) sysRead(conn net.Conn, m *proto.Message) error {
-
-	var fd int64
-	var size int
-
-	log.Printf("sysReadAt decoding syscall buffer")
-	if err := decodeRead(m, &fd, &size); err != nil {
-		log.Printf("sysRead syscall buffer ERR")
-		return err
-	}
-	log.Printf("sysRead syscall buffer OK")
-
-	file, ok := lh.LoadFile(fd)
-	if !ok {
-		log.Printf("os.Read(%v, %v) -> %v\n", fd, size, "Invalid argument")
-		return SendError(conn, "Invalid argument")
-	}
-
-	buf := make([]byte, size)
-	n, err := file.Read(buf)
-	if err != nil && err != io.EOF {
-		log.Printf("os.Read(%v, %v) -> %v\n", fd, size, errStr(err))
-		return SendError(conn, errStr(err))
-	}
-
-	log.Printf("os.Read(%v, %v) -> ...\n", fd, size)
-	return SendResult(conn, buf[:n])
-}
-
-func (lh *LocalHost) sysRead2(conn net.Conn, m *proto.Message) error {
-
-	var fd int64
-	var size int32
-
-	log.Printf("sysRead decoding syscall buffer")
-	if err := m.Decode(&fd, &size); err != nil {
-		log.Printf("sysRead syscall buffer ERR")
-		return err
-	}
-	log.Printf("sysRead syscall buffer OK")
-
-	file, ok := lh.LoadFile(fd)
-	if !ok {
-		log.Printf("os.Read(%v, %v) -> %v\n", fd, size, "Invalid argument")
-		return SendError(conn, "Invalid argument")
-	}
-
-	buf := make([]byte, size)
-	n, err := file.Read(buf)
-	if err != nil && err != io.EOF {
-		log.Printf("os.Read(%v, %v) -> %v\n", fd, size, errStr(err))
-		return SendError(conn, errStr(err))
-	}
-
-	log.Printf("os.Read(%v, %v) -> ...\n", fd, size)
-	return SendResult(conn, buf[:n])
 }
 
 func (lh *LocalHost) sysReadAt(conn net.Conn, m *proto.Message) error {
@@ -205,34 +157,6 @@ func (lh *LocalHost) sysReadAt(conn net.Conn, m *proto.Message) error {
 	return SendResult(conn, buf[:n])
 }
 
-func (lh *LocalHost) sysWrite(conn net.Conn, m *proto.Message) error {
-
-	var fd int64
-	var buf []byte
-
-	log.Printf("sysWrite decoding syscall buffer")
-	if err := m.Decode(&fd, &buf); err != nil {
-		log.Printf("sysWrite syscall buffer ERR")
-		return err
-	}
-	log.Printf("sysWrite syscall buffer OK")
-
-	file, ok := lh.LoadFile(fd)
-	if !ok {
-		log.Printf("os.Write(%v, %v, ...) -> %v\n", fd, len(buf), "Invalid argument")
-		return SendError(conn, "Invalid argument")
-	}
-
-	n, err := file.Write(buf)
-	if err != nil && err != io.EOF {
-		log.Printf("os.Write(%v, %v, ...) -> %v\n", fd, len(buf), errStr(err))
-		return SendError(conn, errStr(err))
-	}
-
-	log.Printf("os.Write(%v, %v, ...) -> %v\n", fd, len(buf), n)
-	return SendResult(conn, int32(n))
-}
-
 func (lh *LocalHost) sysWriteAt(conn net.Conn, m *proto.Message) error {
 
 	var fd int64
@@ -259,31 +183,6 @@ func (lh *LocalHost) sysWriteAt(conn net.Conn, m *proto.Message) error {
 
 	log.Printf("os.WriteAt(%v, %v, ...) -> %v\n", fd, len(buf), n)
 	return SendResult(conn, n)
-}
-
-func (lh *LocalHost) sysOpen(conn net.Conn, m *proto.Message) error {
-
-	var name string
-	var flag int
-	var perm os.FileMode
-
-	log.Printf("sysOpen decoding syscall buffer")
-	if err := m.Decode(&name, &flag, &perm); err != nil {
-		log.Printf("sysOpen syscall buffer ERR")
-		return err
-	}
-	log.Printf("sysOpen syscall buffer OK")
-
-	file, err := os.OpenFile(name, int(flag), os.FileMode(perm))
-	if err != nil {
-		log.Printf("os.Open(%v) -> %v\n", name, errStr(err))
-		return SendError(conn, errStr(err))
-	}
-
-	lh.StoreFile(file)
-
-	log.Printf("os.Open(%v) -> %v\n", name, file.Fd())
-	return SendResult(conn, int64(file.Fd()))
 }
 
 func (lh *LocalHost) sysClose(conn net.Conn, m *proto.Message) error {
@@ -318,45 +217,13 @@ func (lh *LocalHost) sysClose(conn net.Conn, m *proto.Message) error {
 	return SendResult(conn)
 }
 
-func (lh *LocalHost) sysSeek(conn net.Conn, m *proto.Message) error {
-
-	var fd int64
-	var offset int64
-	var whence int
-
-	log.Printf("sysSeek decoding syscall buffer")
-	if err := m.Decode(&fd, &offset, &whence); err != nil {
-		log.Printf("sysSeek syscall buffer ERR")
-		return err
-	}
-	log.Printf("sysSeek syscall buffer OK")
-
-	file, ok := lh.LoadFile(fd)
-	if !ok {
-		log.Printf("os.Seek(%v, %v, %v) -> %v\n", fd, offset, whence, "Invalid argument")
-		return SendError(conn, "Invalid argument")
-	}
-
-	n, err := file.Seek(offset, whence)
-	if err != nil {
-		log.Printf("os.Seeek(%v, %v, %v) -> %v\n", fd, offset, whence, errStr(err))
-		return SendError(conn, errStr(err))
-	}
-
-	log.Printf("os.Seeek(%v, %v, %v) -> %v\n", fd, offset, whence, n)
-	return SendResult(conn, n)
-}
-
 func (lh *LocalHost) StoreFile(file *os.File) {
-
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
 	lh.FDs[int64(file.Fd())] = file
-
 }
 
 func (lh *LocalHost) LoadFile(fd int64) (file *os.File, ok bool) {
-
 	lh.mu.Lock()
 	defer lh.mu.Unlock()
 	file, ok = lh.FDs[fd]

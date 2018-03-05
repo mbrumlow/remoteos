@@ -83,14 +83,9 @@ func (f *File) Close() error {
 }
 
 func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
-	m, err := f.rh.sendCall(SYS_SEEK, f.fd, offset, whence)
-	if err != nil {
+	ret, err = f.rh.seek(f.fd, offset, whence)
+	if err != nil && err != io.EOF {
 		return 0, &os.PathError{"seek", f.name, err}
 	}
-
-	if err := m.Decode(&ret); err != nil {
-		return 0, &os.PathError{"seek", f.name, err}
-	}
-
 	return
 }

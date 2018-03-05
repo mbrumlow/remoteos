@@ -57,4 +57,11 @@ func main() {
 
 	log.Printf("Copied %v bytes\n", n)
 
+	ret, err := rFileA.Seek(0, 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("Seek to %v on %v\n", ret, rFileA.Name())
+
 }

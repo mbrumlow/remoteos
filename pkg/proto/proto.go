@@ -51,6 +51,9 @@ func Encode(bb *bytes.Buffer, a ...interface{}) (err error) {
 		case int:
 			x := int32(v)
 			bWrite(x)
+		case uintptr:
+			x := uint64(v)
+			bWrite(x)
 		case os.FileMode:
 			x := int32(v)
 			bWrite(x)
@@ -89,6 +92,10 @@ func Decode(bb *bytes.Buffer, a ...interface{}) (err error) {
 			var x int32
 			bRead(&x)
 			*v = int(x)
+		case *uintptr:
+			var x uint64
+			bRead(&x)
+			*v = uintptr(x)
 		case *os.FileMode:
 			var x int32
 			bRead(&x)
