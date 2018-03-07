@@ -32,24 +32,11 @@ func (f *File) Write(b []byte) (n int, err error) {
 }
 
 func (f *File) pread64(p []byte, off int64) (n int, err error) {
-
-	m, err := f.rh.sendCall(SYS_PREAD64, f.fd, off, int32(len(p)))
-	if err != nil {
+	n, err = f.rh.pread64(f.fd, p, off)
+	if err != nil && err != io.EOF {
 		return 0, &os.PathError{"read", f.name, err}
 	}
-
-	var buf []byte
-	if err := m.Decode(&buf); err != nil {
-		return 0, &os.PathError{"read", f.name, err}
-	}
-
-	if len(buf) == 0 {
-		return 0, io.EOF
-	}
-
-	copy(p, buf)
-
-	return len(buf), nil
+	return
 }
 
 func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
@@ -57,16 +44,10 @@ func (f *File) ReadAt(b []byte, off int64) (n int, err error) {
 }
 
 func (f *File) pwrite64(b []byte, off int64) (n int, err error) {
-
-	m, err := f.rh.sendCall(SYS_PWRITE64, f.fd, off, int32(len(b)), b)
+	n, err = f.rh.pwrite64(f.fd, b, off)
 	if err != nil {
 		return 0, &os.PathError{"write", f.name, err}
 	}
-
-	if err := m.Decode(&n); err != nil {
-		return 0, &os.PathError{"write", f.name, err}
-	}
-
 	return
 }
 
@@ -74,18 +55,26 @@ func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
 	return f.pwrite64(b, off)
 }
 
-func (f *File) Close() error {
-	_, err := f.rh.sendCall(SYS_CLOSE, f.fd)
-	if err != nil {
-		return &os.PathError{"close", f.name, err}
-	}
-	return err
-}
-
 func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
 	ret, err = f.rh.seek(f.fd, offset, whence)
-	if err != nil && err != io.EOF {
+	if err != nil {
 		return 0, &os.PathError{"seek", f.name, err}
 	}
 	return
+}
+
+func (f *File) Sync() error {
+	err := f.rh.sync(f.fd)
+	if err != nil {
+		return &os.PathError{"sync", f.name, err}
+	}
+	return nil
+}
+
+func (f *File) Close() error {
+	err := f.rh.close(f.fd)
+	if err != nil {
+		return &os.PathError{"close", f.name, err}
+	}
+	return nil
 }

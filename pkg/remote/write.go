@@ -2,27 +2,25 @@ package remote
 
 import (
 	"bytes"
-	"errors"
-
-	"github.com/mbrumlow/remoteos/pkg/proto"
+	"log"
 )
 
 func encodeWrite(fd int64, b []byte) ([]byte, error) {
-	m := proto.NewMessage(new(bytes.Buffer))
-	if err := m.Encode(CMD_SYSCALL, SYS_WRITE, fd, b); err != nil {
+	m := NewMessage(new(bytes.Buffer))
+	if err := m.EncodeCall(SYS_WRITE, fd, b); err != nil {
 		return nil, err
 	}
 	return m.Bytes(), nil
 }
 
-func decodeWrite(m *proto.Message, fd *int64, b *[]byte) error {
+func decodeWrite(m *Message, fd *int64, b *[]byte) error {
 	return m.Decode(fd, b)
 }
 
-func (rh *RemoteHost) write(fd int64, p []byte) (n int, err error) {
+func (rh *RemoteHost) write(fd int64, b []byte) (n int, err error) {
 
 	// Encode
-	call, err := encodeWrite(fd, p)
+	call, err := encodeWrite(fd, b)
 	if err != nil {
 		return 0, err
 	}
@@ -41,7 +39,7 @@ func (rh *RemoteHost) write(fd int64, p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (lh *LocalHost) write(m *proto.Message) ([]byte, error) {
+func (lh *LocalHost) write(m *Message) ([]byte, error) {
 
 	var fd int64
 	var buf []byte
@@ -50,15 +48,18 @@ func (lh *LocalHost) write(m *proto.Message) ([]byte, error) {
 		return nil, err
 	}
 
-	file, ok := lh.LoadFile(fd)
-	if !ok {
-		return result(errors.New("Invalid arguemtn"), nil)
+	file, err := lh.LoadFile(fd)
+	if err != nil {
+		log.Printf("write(%v, [%v]) -> %v\n", fd, len(buf), err)
+		return result(err, nil)
 	}
 
 	n, err := file.Write(buf)
 	if err != nil {
+		log.Printf("write(%v, [%v]) -> %v\n", fd, len(buf), err)
 		return result(err, nil)
 	}
 
+	log.Printf("write(%v, [%v]) -> %v\n", fd, len(buf), n)
 	return result(nil, n)
 }

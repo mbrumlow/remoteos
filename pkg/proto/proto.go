@@ -3,34 +3,9 @@ package proto
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"os"
 )
-
-type Message struct {
-	bb *bytes.Buffer
-}
-
-func NewMessage(bb *bytes.Buffer) *Message {
-	return &Message{bb: bb}
-}
-
-func (m *Message) Bytes() []byte {
-	return m.bb.Bytes()
-}
-
-func (m *Message) Decode(a ...interface{}) error {
-	return Decode(m.bb, a...)
-}
-
-func (m *Message) Encode(a ...interface{}) error {
-	return Encode(m.bb, a...)
-}
-
-func (m *Message) DecodeError() error {
-	return DecodeError(m.bb)
-}
 
 func Encode(bb *bytes.Buffer, a ...interface{}) (err error) {
 
@@ -120,33 +95,4 @@ func Decode(bb *bytes.Buffer, a ...interface{}) (err error) {
 	}
 
 	return err
-}
-
-func EncodeCall(bb *bytes.Buffer, cmd, call uint32, a ...interface{}) {
-	Encode(bb, cmd)
-	Encode(bb, call)
-	Encode(bb, a...)
-}
-
-func EncodeError(bb *bytes.Buffer, s string) error {
-	return Encode(bb, int32(1), s)
-}
-
-func EncodeResult(bb *bytes.Buffer, a ...interface{}) error {
-	if err := Encode(bb, int32(0)); err != nil {
-		return err
-	}
-	if err := Encode(bb, a...); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func DecodeError(bb *bytes.Buffer) error {
-	var s string
-	if err := Decode(bb, &s); err != nil {
-		return err
-	}
-	return fmt.Errorf("%v", s)
 }

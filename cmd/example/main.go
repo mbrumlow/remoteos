@@ -42,26 +42,45 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer rFileA.Close()
 
 	// Create new file on the remote instance.
 	rFileB, err := r.Create(tmpfile.Name() + ".copy")
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer rFileB.Close()
 
 	// Copy from one to the other.
-	n, err := io.Copy(rFileB, rFileA)
-	if err != nil {
+	if n, err := io.Copy(rFileB, rFileA); err != nil {
 		log.Fatal(err)
+	} else {
+		log.Printf("Copied %v bytes\n", n)
 	}
 
-	log.Printf("Copied %v bytes\n", n)
-
-	ret, err := rFileA.Seek(0, 0)
-	if err != nil {
+	if ret, err := rFileA.Seek(0, 0); err != nil {
 		log.Fatal(err)
+	} else {
+		log.Printf("Seek to %v on %v\n", ret, rFileA.Name())
 	}
 
-	log.Printf("Seek to %v on %v\n", ret, rFileA.Name())
+	if n, err := rFileB.WriteAt([]byte("test"), 1); err != nil {
+		log.Fatal(err)
+	} else {
+		log.Printf("WriteAt %v bytes\n", n)
+	}
+
+	buf := make([]byte, 4)
+	if n, err := rFileB.ReadAt(buf, 1); err != nil {
+		log.Fatal(err)
+	} else {
+		log.Printf("ReadAt %v bytes -> [%v]\n", n, string(buf))
+	}
+
+	if err := rFileB.Sync(); err != nil {
+		log.Fatal(err)
+	} else {
+		log.Println("Sync OK")
+	}
 
 }

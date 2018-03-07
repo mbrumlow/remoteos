@@ -7,24 +7,54 @@ import (
 	"io"
 	"net"
 	"os"
-
-	"github.com/mbrumlow/remoteos/pkg/proto"
+	"sync"
+	"sync/atomic"
 )
+
+type RemoteCall uint32
 
 const (
-	CMD_SYSCALL = uint32(0)
-
-	SYS_READ     = uint32(0)
-	SYS_WRITE    = uint32(1)
-	SYS_OPEN     = uint32(2)
-	SYS_CLOSE    = uint32(3)
-	SYS_SEEK     = uint32(8)
-	SYS_PREAD64  = uint32(17)
-	SYS_PWRITE64 = uint32(18)
+	SYS_READ     = RemoteCall(0)
+	SYS_WRITE    = RemoteCall(1)
+	SYS_OPEN     = RemoteCall(2)
+	SYS_CLOSE    = RemoteCall(3)
+	SYS_SEEK     = RemoteCall(8)
+	SYS_PREAD64  = RemoteCall(17)
+	SYS_PWRITE64 = RemoteCall(18)
+	SYS_SYNC     = RemoteCall(162)
 )
 
+func (rc RemoteCall) String() string {
+	switch rc {
+	case 0:
+		return "read"
+	case 1:
+		return "write"
+	case 2:
+		return "open"
+	case 3:
+		return "close"
+	case 8:
+		return "seek"
+	case 17:
+		return "pread64"
+	case 18:
+		return "pwrite64"
+	case 162:
+		return "sync"
+	default:
+		return fmt.Sprintf("%d", rc)
+	}
+}
+
 type RemoteHost struct {
-	conn net.Conn
+	conn      net.Conn
+	callCount uint64
+
+	sendMutex sync.Mutex
+
+	receiveMutex sync.Mutex
+	bufferMap    map[uint64]*bytes.Buffer
 }
 
 func Connect(host string) (*RemoteHost, error) {
@@ -32,7 +62,9 @@ func Connect(host string) (*RemoteHost, error) {
 	// TODO add auth and encryption.
 
 	conn, err := net.Dial("tcp", host)
-	return &RemoteHost{conn: conn}, err
+	return &RemoteHost{conn: conn,
+		bufferMap: make(map[uint64]*bytes.Buffer),
+	}, err
 }
 
 func SendBuffer(conn net.Conn, b []byte) error {
@@ -50,37 +82,104 @@ func SendBuffer(conn net.Conn, b []byte) error {
 	return nil
 }
 
-func SendError(conn net.Conn, s string) error {
-	ret := new(bytes.Buffer)
-	proto.EncodeError(ret, s)
-	return SendBuffer(conn, ret.Bytes())
+func sendBuffer2(conn net.Conn, id uint64, b []byte) error {
+	size := uint32(len(b))
+	if err := binary.Write(conn, binary.BigEndian, size); err != nil {
+		return err
+	}
+
+	if err := binary.Write(conn, binary.BigEndian, id); err != nil {
+		return err
+	}
+
+	// TODO consider compression.
+
+	if _, err := conn.Write(b); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func SendResult(conn net.Conn, a ...interface{}) error {
+func (rh *RemoteHost) sendBuffer(id uint64, b []byte) error {
+	rh.sendMutex.Lock()
+	defer rh.sendMutex.Unlock()
+	return sendBuffer2(rh.conn, id, b)
+}
+
+func (rh *RemoteHost) receiveBuffer(conn net.Conn, id uint64) (*bytes.Buffer, error) {
+
+	defer rh.receiveMutex.Unlock()
+
+	for {
+		rh.receiveMutex.Lock()
+
+		if bb, ok := rh.bufferMap[id]; ok {
+			return bb, nil
+		}
+
+		var size uint32
+		if err := binary.Read(conn, binary.BigEndian, &size); err != nil {
+			return nil, err
+		}
+
+		var bid uint64
+		if err := binary.Read(conn, binary.BigEndian, &bid); err != nil {
+			return nil, err
+		}
+
+		buf := make([]byte, size)
+		if _, err := io.ReadFull(conn, buf); err != nil {
+			return nil, err
+		}
+
+		if id == bid {
+			return bytes.NewBuffer(buf), nil
+		} else {
+			rh.bufferMap[bid] = bytes.NewBuffer(buf)
+		}
+
+		rh.receiveMutex.Unlock()
+	}
+
+	return nil, fmt.Errorf("Failed to receive buffer")
+}
+
+/*
+func SendError(conn net.Conn, s string) error {
 	ret := new(bytes.Buffer)
-	proto.EncodeResult(ret, a...)
+	EncodeError(ret, s)
 	return SendBuffer(conn, ret.Bytes())
 }
+*/
+
+/*
+func SendResult(conn net.Conn, a ...interface{}) error {
+	ret := new(bytes.Buffer)
+	EncodeResult(ret, a...)
+	return SendBuffer(conn, ret.Bytes())
+}
+*/
 
 func result(e error, a ...interface{}) ([]byte, error) {
 
-	ret := new(bytes.Buffer)
+	m := NewMessage(new(bytes.Buffer))
 
 	if e != nil {
-		if err := proto.EncodeError(ret, errStr(e)); err != nil {
+		if err := m.EncodeError(errStr(e)); err != nil {
 			return nil, err
 		}
-		return ret.Bytes(), nil
+		return m.Bytes(), nil
 	}
 
-	if err := proto.EncodeResult(ret, a...); err != nil {
+	if err := m.EncodeResult(a...); err != nil {
 		return nil, err
 	}
 
-	return ret.Bytes(), nil
+	return m.Bytes(), nil
 }
 
-func reciveBuffer(conn net.Conn) (*bytes.Buffer, error) {
+func receiveBuffer(conn net.Conn) (*bytes.Buffer, error) {
 	var size uint32
 	if err := binary.Read(conn, binary.BigEndian, &size); err != nil {
 		return nil, err
@@ -94,22 +193,24 @@ func reciveBuffer(conn net.Conn) (*bytes.Buffer, error) {
 	return bytes.NewBuffer(buf), nil
 }
 
-func (rh *RemoteHost) sendCall2(b []byte) (*proto.Message, error) {
+func (rh *RemoteHost) sendCall2(b []byte) (*Message, error) {
 
-	if err := SendBuffer(rh.conn, b); err != nil {
+	id := atomic.AddUint64(&rh.callCount, 1)
+
+	if err := rh.sendBuffer(id, b); err != nil {
 		// TODO: figure out what to do.
 		// TODO: Mabye sessions for reconnect?
 		return nil, err
 	}
 
-	bb, err := reciveBuffer(rh.conn)
+	bb, err := rh.receiveBuffer(rh.conn, id)
 	if err != nil {
 		// TODO: figure out what to do.
 		// TODO: Mabye sessions for reconnect?
 		return nil, err
 	}
 
-	m := proto.NewMessage(bb)
+	m := NewMessage(bb)
 
 	var ret int32
 	if err := m.Decode(&ret); err != nil {
@@ -128,25 +229,25 @@ func (rh *RemoteHost) sendCall2(b []byte) (*proto.Message, error) {
 	return m, fmt.Errorf("unknown")
 }
 
-func (rh *RemoteHost) sendCall(call uint32, a ...interface{}) (*proto.Message, error) {
+func (rh *RemoteHost) sendCall(call RemoteCall, a ...interface{}) (*Message, error) {
 
-	request := new(bytes.Buffer)
-	proto.EncodeCall(request, CMD_SYSCALL, call, a...)
+	req := NewMessage(new(bytes.Buffer))
+	req.EncodeCall(call, a...)
 
-	if err := SendBuffer(rh.conn, request.Bytes()); err != nil {
+	if err := SendBuffer(rh.conn, req.Bytes()); err != nil {
 		// TODO: figure out what to do.
 		// TODO: Mabye sessions for reconnect?
 		return nil, err
 	}
 
-	bb, err := reciveBuffer(rh.conn)
+	bb, err := receiveBuffer(rh.conn)
 	if err != nil {
 		// TODO: figure out what to do.
 		// TODO: Mabye sessions for reconnect?
 		return nil, err
 	}
 
-	m := proto.NewMessage(bb)
+	m := NewMessage(bb)
 	var ret int32
 
 	if err := m.Decode(&ret); err != nil {

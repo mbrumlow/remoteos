@@ -2,20 +2,18 @@ package remote
 
 import (
 	"bytes"
-	"errors"
-
-	"github.com/mbrumlow/remoteos/pkg/proto"
+	"log"
 )
 
 func encodeSeek(fd, offset int64, whence int) ([]byte, error) {
-	m := proto.NewMessage(new(bytes.Buffer))
-	if err := m.Encode(CMD_SYSCALL, SYS_SEEK, fd, offset, whence); err != nil {
+	m := NewMessage(new(bytes.Buffer))
+	if err := m.EncodeCall(SYS_SEEK, fd, offset, whence); err != nil {
 		return nil, err
 	}
 	return m.Bytes(), nil
 }
 
-func decodeSeek(m *proto.Message, fd, offset *int64, whence *int) error {
+func decodeSeek(m *Message, fd, offset *int64, whence *int) error {
 	return m.Decode(fd, offset, whence)
 }
 
@@ -41,7 +39,7 @@ func (rh *RemoteHost) seek(fd, offset int64, whence int) (ret int64, err error) 
 	return ret, nil
 }
 
-func (lh *LocalHost) seek(m *proto.Message) ([]byte, error) {
+func (lh *LocalHost) seek(m *Message) ([]byte, error) {
 
 	var fd int64
 	var offset int64
@@ -51,15 +49,18 @@ func (lh *LocalHost) seek(m *proto.Message) ([]byte, error) {
 		return nil, err
 	}
 
-	file, ok := lh.LoadFile(fd)
-	if !ok {
-		return result(errors.New("Invalid arguemtn"), nil)
+	file, err := lh.LoadFile(fd)
+	if err != nil {
+		log.Printf("seek(%v, %v, %v) -> %v\n", fd, offset, whence, err)
+		return result(err, nil)
 	}
 
 	ret, err := file.Seek(offset, whence)
 	if err != nil {
+		log.Printf("seek(%v, %v, %v) -> %v\n", fd, offset, whence, err)
 		return result(err, nil)
 	}
 
+	log.Printf("seek(%v, %v, %v) -> %v\n", fd, offset, whence, ret)
 	return result(nil, ret)
 }

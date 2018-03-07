@@ -2,21 +2,19 @@ package remote
 
 import (
 	"bytes"
-	"errors"
 	"io"
-
-	"github.com/mbrumlow/remoteos/pkg/proto"
+	"log"
 )
 
 func encodeRead(fd int64, size int) ([]byte, error) {
-	m := proto.NewMessage(new(bytes.Buffer))
-	if err := m.Encode(CMD_SYSCALL, SYS_READ, fd, size); err != nil {
+	m := NewMessage(new(bytes.Buffer))
+	if err := m.Encode(SYS_READ, fd, size); err != nil {
 		return nil, err
 	}
 	return m.Bytes(), nil
 }
 
-func decodeRead(m *proto.Message, fd *int64, size *int) error {
+func decodeRead(m *Message, fd *int64, size *int) error {
 	return m.Decode(fd, size)
 }
 
@@ -48,7 +46,7 @@ func (rh *RemoteHost) read(fd int64, p []byte) (n int, err error) {
 	return len(buf), nil
 }
 
-func (lh *LocalHost) read(m *proto.Message) ([]byte, error) {
+func (lh *LocalHost) read(m *Message) ([]byte, error) {
 
 	var fd int64
 	var size int
@@ -57,16 +55,19 @@ func (lh *LocalHost) read(m *proto.Message) ([]byte, error) {
 		return nil, err
 	}
 
-	file, ok := lh.LoadFile(fd)
-	if !ok {
-		return result(errors.New("Invalid arguemtn"), nil)
+	file, err := lh.LoadFile(fd)
+	if err != nil {
+		log.Printf("read(%v, %v) -> %v\n", fd, size, err)
+		return result(err, nil)
 	}
 
 	buf := make([]byte, size)
 	n, err := file.Read(buf)
 	if err != nil && err != io.EOF {
+		log.Printf("read(%v, %v) -> %v\n", fd, size, err)
 		return result(err, nil)
 	}
 
+	log.Printf("read(%v, %v) -> [%v]\n", fd, size, n)
 	return result(nil, buf[:n])
 }
