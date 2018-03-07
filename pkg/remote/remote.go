@@ -82,7 +82,7 @@ func SendBuffer(conn net.Conn, b []byte) error {
 	return nil
 }
 
-func sendBuffer2(conn net.Conn, id uint64, b []byte) error {
+func sendBuffer2(conn io.Writer, id uint64, b []byte) error {
 	size := uint32(len(b))
 	if err := binary.Write(conn, binary.BigEndian, size); err != nil {
 		return err
