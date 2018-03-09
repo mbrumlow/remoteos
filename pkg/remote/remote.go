@@ -3,10 +3,12 @@ package remote
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"regexp"
 	"sync"
 	"sync/atomic"
 )
@@ -56,6 +58,11 @@ type RemoteHost struct {
 	receiveMutex sync.Mutex
 	bufferMap    map[uint64]*bytes.Buffer
 }
+
+var uriRE = regexp.MustCompile("^([a-zA-Z]+)://(.*)$")
+
+var hostMU sync.RWMutex
+var hostMap = make(map[string]*RemoteHost)
 
 func Connect(host string) (*RemoteHost, error) {
 
@@ -264,6 +271,67 @@ func (rh *RemoteHost) sendCall(call RemoteCall, a ...interface{}) (*Message, err
 	}
 
 	return m, fmt.Errorf("unknown")
+}
+
+func Register(uri, host string) error {
+	r, err := Connect(host)
+	if err != nil {
+		return err
+	}
+
+	hostMU.Lock()
+	defer hostMU.Unlock()
+
+	if _, ok := hostMap[uri]; ok {
+		return errors.New("URI already registered")
+	}
+
+	hostMap[uri] = r
+
+	return nil
+}
+
+func remoteLookup(name string) (*RemoteHost, string, bool) {
+
+	m := uriRE.FindStringSubmatch(name)
+	if len(m) == 3 {
+		if r, ok := hostMap[m[1]]; ok {
+			return r, m[2], ok
+		}
+	}
+	return nil, "", false
+}
+
+func OpenFile(name string, flag int, perm os.FileMode) (*File, error) {
+	hostMU.RLock()
+	defer hostMU.RUnlock()
+
+	if r, n, ok := remoteLookup(name); ok {
+		return r.OpenFile(n, flag, perm)
+	}
+
+	f, err := os.OpenFile(name, flag, perm)
+	if err != nil {
+		return nil, err
+	}
+
+	return &File{file: f}, nil
+}
+
+func Open(name string) (*File, error) {
+	return OpenFile(name, os.O_RDONLY, 0)
+}
+
+func Create(name string) (*File, error) {
+	return OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+}
+
+func Remove(name string) error {
+	if r, n, ok := remoteLookup(name); ok {
+		// TODO: implement remote remove.
+		return r.remove(n)
+	}
+	return os.Remove(name)
 }
 
 func (rh *RemoteHost) OpenFile(name string, flag int, perm os.FileMode) (*File, error) {

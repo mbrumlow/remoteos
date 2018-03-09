@@ -4,9 +4,8 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
-	"os"
 
-	"github.com/mbrumlow/remoteos/pkg/remote"
+	os "github.com/mbrumlow/remoteos/pkg/remote"
 )
 
 func main() {
@@ -32,20 +31,20 @@ func main() {
 	log.Printf("Test File: %v\n", tmpfile.Name())
 
 	// Connect to a remote syscall provider.
-	r, err := remote.Connect(":7575")
+	err = os.Register("lin", ":7575")
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Open the file over the remote interface.
-	rFileA, err := r.Open(tmpfile.Name())
+	rFileA, err := os.Open("lin://" + tmpfile.Name())
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer rFileA.Close()
 
 	// Create new file on the remote instance.
-	rFileB, err := r.Create(tmpfile.Name() + ".copy")
+	rFileB, err := os.Create("lin://" + tmpfile.Name() + ".copy")
 	if err != nil {
 		log.Fatal(err)
 	}

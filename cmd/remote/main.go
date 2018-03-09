@@ -46,18 +46,20 @@ func parrentProcess() {
 
 func childProcess() {
 
-	conIn := os.NewFile(3, "connIn")
-	conOut := os.NewFile(4, "conOut")
-
-	// TODO handle errors -- check for null on handles.
+	log.SetOutput(os.Stderr)
 
 	lh := remote.NewLocalHost()
-	lh.Run(conIn, conOut)
+
+	out := os.Stdout
+	os.Stdout = os.Stderr
+
+	lh.Run(os.Stdin, out)
 }
 
 func handleConnection(conn net.Conn) {
 
 	defer conn.Close()
+
 	cR, pW, err := os.Pipe()
 	if err != nil {
 		log.Fatal(err)
@@ -73,17 +75,16 @@ func handleConnection(conn net.Conn) {
 	defer cW.Close()
 
 	cmd := exec.Command(os.Args[0], "-child")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.ExtraFiles = []*os.File{
-		cR,
-		cW,
-	}
+	cmd.Stdout = cW
+	cmd.Stdin = cR
+	cmd.Stderr = os.Stdout
 
 	log.Printf("Got new connection, forking...\n")
 
-	// TODO handle errors.
-	cmd.Start()
+	if err := cmd.Start(); err != nil {
+		log.Printf("Failed to fork: %v\n", err)
+		return
+	}
 
 	go func() {
 		io.Copy(pW, conn)
@@ -101,5 +102,4 @@ func handleConnection(conn net.Conn) {
 
 	// TODO handle errors.
 	cmd.Wait()
-
 }
